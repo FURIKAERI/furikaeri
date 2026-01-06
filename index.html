@@ -459,6 +459,50 @@
             object-fit: contain;
             border-radius: 6px;
         }
+
+        
+        .backup-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 15px;
+        }
+        
+        .backup-card {
+            background: var(--bg-tertiary);
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            text-align: center;
+        }
+        
+        .backup-card-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+        }
+        
+        .backup-card-desc {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 15px;
+            min-height: 36px;
+        }
+        
+        .btn-danger {
+            background: #ff6b6b !important;
+        }
+        
+        .btn-danger:hover {
+            background: #ee5252 !important;
+        }
+        
+        @media (max-width: 600px) {
+            .backup-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
     </style>
 </head>
 <body>
@@ -483,6 +527,40 @@
             </div>
             <div id="categoryList" class="category-list"></div>
         </div>
+
+        <!-- データ管理 -->
+        <div class="section">
+            <div class="section-title">💾 データ管理</div>
+            
+            <div class="backup-grid">
+                <div class="backup-card">
+                    <div class="backup-card-title">📤 エクスポート</div>
+                    <p class="backup-card-desc">データをJSONファイルとして保存</p>
+                    <button class="btn" type="button" id="exportBtn">エクスポート</button>
+                </div>
+                
+                <div class="backup-card">
+                    <div class="backup-card-title">📥 インポート（上書き）</div>
+                    <p class="backup-card-desc">バックアップファイルから復元</p>
+                    <input type="file" id="importFile" accept=".json" style="display:none">
+                    <button class="btn" type="button" id="importBtn">インポート</button>
+                </div>
+                
+                <div class="backup-card">
+                    <div class="backup-card-title">🔄 マージ（追加）</div>
+                    <p class="backup-card-desc">既存データに追加</p>
+                    <input type="file" id="mergeFile" accept=".json" style="display:none">
+                    <button class="btn" type="button" id="mergeBtn">マージ</button>
+                </div>
+                
+                <div class="backup-card">
+                    <div class="backup-card-title">🗑️ 全削除</div>
+                    <p class="backup-card-desc">すべてのデータを削除</p>
+                    <button class="btn btn-danger" type="button" id="clearBtn">全削除</button>
+                </div>
+            </div>
+        </div>
+
         
         <!-- 新規記録 -->
         <div class="section">
@@ -596,11 +674,7 @@
             }
             return {
                 theme: 'light',
-                categories: [
-                    { id: 1, name: '仕事', color: '#667eea' },
-                    { id: 2, name: '推し活', color: '#f093fb' },
-                    { id: 3, name: 'ダイエット', color: '#4facfe' }
-                ],
+                categories: [],
                 entries: []
             };
         }
@@ -946,6 +1020,166 @@
             document.getElementById('imageModal').classList.remove('active');
         }
 
+        
+        
+        // バックアップ機能
+        function exportData() {
+            try {
+                const dataStr = JSON.stringify(appData, null, 2);
+                const dataBlob = new Blob([dataStr], { type: 'application/json' });
+                const url = URL.createObjectURL(dataBlob);
+                const link = document.createElement('a');
+                link.href = url;
+                const date = new Date().toISOString().split('T')[0];
+                link.download = `FURIKAERI-backup-${date}.json`;
+                link.click();
+                URL.revokeObjectURL(url);
+                showStatus('✅ データをエクスポートしました！');
+            } catch (e) {
+                console.error('エクスポートエラー:', e);
+                showStatus('❌ エクスポートに失敗しました');
+            }
+        }
+        
+        function importData(file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const importedData = JSON.parse(e.target.result);
+                    
+                    if (!importedData.categories || !importedData.entries) {
+                        throw new Error('無効なデータ形式です');
+                    }
+                    
+                    const confirmMsg = \`バックアップデータをインポートしますか？\n\n\` +
+                        \`カテゴリー: \${importedData.categories.length}個\n\` +
+                        \`記録: \${importedData.entries.length}件\n\n\` +
+                        \`※現在のデータは上書きされます\`;
+                    
+                    if (confirm(confirmMsg)) {
+                        appData.categories = importedData.categories;
+                        appData.entries = importedData.entries;
+                        if (importedData.theme) {
+                            appData.theme = importedData.theme;
+                        }
+                        
+                        saveData();
+                        applyTheme();
+                        renderCategories();
+                        renderCategoryOptions();
+                        renderEntries();
+                        showStatus('✅ データをインポートしました！');
+                    }
+                } catch (e) {
+                    console.error('インポートエラー:', e);
+                    alert('❌ インポート失敗\n\nファイルが壊れているか、形式が正しくありません。');
+                }
+            };
+            reader.readAsText(file);
+        }
+        
+        function mergeData(file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const importedData = JSON.parse(e.target.result);
+                    
+                    if (!importedData.categories || !importedData.entries) {
+                        throw new Error('無効なデータ形式です');
+                    }
+                    
+                    const confirmMsg = \`バックアップデータをマージしますか？\n\n\` +
+                        \`追加されるカテゴリー: \${importedData.categories.length}個\n\` +
+                        \`追加される記録: \${importedData.entries.length}件\n\n\` +
+                        \`※現在のデータに追加されます（上書きではありません）\`;
+                    
+                    if (confirm(confirmMsg)) {
+                        const maxCatId = appData.categories.length > 0 
+                            ? Math.max(...appData.categories.map(c => c.id)) 
+                            : 0;
+                        
+                        const categoryIdMap = {};
+                        importedData.categories.forEach((cat, index) => {
+                            const newId = maxCatId + index + 1;
+                            categoryIdMap[cat.id] = newId;
+                            appData.categories.push({
+                                id: newId,
+                                name: cat.name,
+                                color: cat.color
+                            });
+                        });
+                        
+                        importedData.entries.forEach(entry => {
+                            const newEntry = {
+                                ...entry,
+                                id: Date.now() + Math.random(),
+                                categoryId: categoryIdMap[entry.categoryId] || entry.categoryId
+                            };
+                            appData.entries.push(newEntry);
+                        });
+                        
+                        saveData();
+                        renderCategories();
+                        renderCategoryOptions();
+                        renderEntries();
+                        showStatus('✅ データをマージしました！');
+                    }
+                } catch (e) {
+                    console.error('マージエラー:', e);
+                    alert('❌ マージ失敗\n\nファイルが壊れているか、形式が正しくありません。');
+                }
+            };
+            reader.readAsText(file);
+        }
+        
+        function clearAllData() {
+            const confirmMsg = '⚠️ 警告\n\nすべてのデータを削除しますか？\n\n' +
+                \`カテゴリー: \${appData.categories.length}個\n\` +
+                \`記録: \${appData.entries.length}件\n\n\` +
+                '※この操作は取り消せません！';
+            
+            if (confirm(confirmMsg)) {
+                const doubleConfirm = confirm('本当に削除しますか？\n\n最終確認です。');
+                if (doubleConfirm) {
+                    appData.categories = [];
+                    appData.entries = [];
+                    saveData();
+                    renderCategories();
+                    renderCategoryOptions();
+                    renderEntries();
+            
+            // バックアップ機能のイベントリスナー
+            document.getElementById('exportBtn').addEventListener('click', exportData);
+            
+            document.getElementById('importBtn').addEventListener('click', function() {
+                document.getElementById('importFile').click();
+            });
+            
+            document.getElementById('importFile').addEventListener('change', function(e) {
+                if (e.target.files.length > 0) {
+                    importData(e.target.files[0]);
+                    e.target.value = '';
+                }
+            });
+            
+            document.getElementById('mergeBtn').addEventListener('click', function() {
+                document.getElementById('mergeFile').click();
+            });
+            
+            document.getElementById('mergeFile').addEventListener('change', function(e) {
+                if (e.target.files.length > 0) {
+                    mergeData(e.target.files[0]);
+                    e.target.value = '';
+                }
+            });
+            
+            document.getElementById('clearBtn').addEventListener('click', clearAllData);
+
+                    showStatus('✅ すべてのデータを削除しました');
+                }
+            }
+        }
+
         // 初期化
         function init() {
             console.log('初期化開始');
@@ -1083,4 +1317,4 @@
         console.log('スクリプト読み込み完了');
     </script>
 </body>
-</html>
+</html>                                                                                                                                                                                                                               
