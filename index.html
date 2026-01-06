@@ -596,18 +596,42 @@
             }
             return {
                 theme: 'light',
-                categories: [],
+                categories: [
+                    { id: 1, name: '仕事', color: '#667eea' },
+                    { id: 2, name: '推し活', color: '#f093fb' },
+                    { id: 3, name: 'ダイエット', color: '#4facfe' }
+                ],
                 entries: []
             };
         }
 
         function saveData() {
             try {
-                localStorage.setItem('furikaeriData', JSON.stringify(appData));
-                console.log('データ保存完了');
+                const dataStr = JSON.stringify(appData);
+                const dataSize = new Blob([dataStr]).size;
+                
+                // 5MBを超える場合は警告
+                if (dataSize > 5 * 1024 * 1024) {
+                    showStatus('⚠️ データが大きすぎます。画像を減らすことをおすすめします。');
+                    console.warn('データサイズ:', (dataSize / 1024 / 1024).toFixed(2), 'MB');
+                }
+                
+                localStorage.setItem('furikaeriData', dataStr);
+                console.log('データ保存完了 (サイズ:', (dataSize / 1024).toFixed(2), 'KB)');
             } catch (e) {
                 console.error('データ保存エラー:', e);
+                
+                // QuotaExceededError の場合
+                if (e.name === 'QuotaExceededError' || e.code === 22) {
+                    showStatus('❌ 保存容量が足りません。画像を減らすか、古い記録を削除してください。');
+                    alert('⚠️ 保存失敗\n\nブラウザの保存容量が足りません。\n\n対処方法：\n1. 画像を少なくする\n2. 古い記録を削除する\n3. 画像なしで保存する');
+                    return false;
+                } else {
+                    showStatus('❌ 保存に失敗しました');
+                    return false;
+                }
             }
+            return true;
         }
 
         const appData = loadData();
@@ -669,23 +693,58 @@
             });
         }
 
-        function handleFiles(files, container, imagesArray) {
-            Array.from(files).forEach(file => {
+        // 画像を圧縮する関数
+        function compressImage(file, maxWidth = 800, quality = 0.7) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        let width = img.width;
+                        let height = img.height;
+                        
+                        // 最大幅を超える場合は縮小
+                        if (width > maxWidth) {
+                            height = (height * maxWidth) / width;
+                            width = maxWidth;
+                        }
+                        
+                        canvas.width = width;
+                        canvas.height = height;
+                        
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, width, height);
+                        
+                        // JPEG形式で圧縮（品質70%）
+                        const compressedData = canvas.toDataURL('image/jpeg', quality);
+                        resolve(compressedData);
+                    };
+                    img.onerror = reject;
+                    img.src = e.target.result;
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+        
+        async function handleFiles(files, container, imagesArray) {
+            for (const file of Array.from(files)) {
                 if (file.type.startsWith('image/')) {
-                    const reader = new FileReader();
-                    reader.onload = (e) => {
-                        const imageData = e.target.result;
-                        imagesArray.push(imageData);
+                    try {
+                        // 画像を圧縮
+                        const compressedData = await compressImage(file);
+                        imagesArray.push(compressedData);
                         
                         const div = document.createElement('div');
                         div.className = 'image-preview';
                         div.innerHTML = `
-                            <img src="${imageData}">
+                            <img src="${compressedData}">
                             <button class="image-preview-remove" type="button">×</button>
                         `;
                         
                         div.querySelector('button').addEventListener('click', function() {
-                            const index = imagesArray.indexOf(imageData);
+                            const index = imagesArray.indexOf(compressedData);
                             if (index > -1) {
                                 imagesArray.splice(index, 1);
                                 div.remove();
@@ -693,10 +752,12 @@
                         });
                         
                         container.appendChild(div);
-                    };
-                    reader.readAsDataURL(file);
+                    } catch (error) {
+                        console.error('画像の読み込みに失敗:', error);
+                        showStatus('❌ 画像の読み込みに失敗しました');
+                    }
                 }
-            });
+            }
         }
 
         // カテゴリー表示
@@ -936,7 +997,13 @@
                     images: [...currentImages]
                 });
                 
-                saveData();
+                const saveSuccess = saveData();
+                if (!saveSuccess) {
+                    // 保存失敗時は追加したエントリを削除
+                    appData.entries = appData.entries.filter(e => e.id !== newEntry.id);
+                    return;
+                }
+                
                 document.getElementById('entryText').value = '';
                 document.getElementById('entryCategory').value = '';
                 document.getElementById('entryDate').value = new Date().toISOString().split('T')[0];
@@ -965,7 +1032,10 @@
                     entry.text = text;
                     entry.images = [...editImages];
                     
-                    saveData();
+                    const saveSuccess = saveData();
+                    if (!saveSuccess) {
+                        return;
+                    }
                     renderEntries();
                     closeEditModal();
                     showStatus('✅ 記録を更新しました');
